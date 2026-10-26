@@ -312,7 +312,7 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
 
         return new ProducerRecord<>(
             topic,
-            (Integer) map.get("partition"),
+            this.processPartition(map.get("partition")),
             this.processTimestamp(map.get("timestamp")),
             key,
             value,
@@ -352,25 +352,47 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
         throw new IllegalArgumentException("Invalid type of timestamp with type '" + timestamp.getClass() + "'");
     }
 
-    private Iterable<Header> processHeaders(Object headers) {
+    Integer processPartition(Object partition) {
+        if (partition == null) {
+            return null;
+        }
+
+        if (partition instanceof Number number) {
+            return number.intValue();
+        }
+
+        if (partition instanceof String s) {
+            return Integer.parseInt(s);
+        }
+
+        throw new IllegalArgumentException("Invalid type of partition with type '" + partition.getClass() + "'");
+    }
+
+    Iterable<Header> processHeaders(Object headers) {
         if (headers == null) {
             return null;
         }
 
-        if (headers instanceof Map) {
-            return ((Map<?, ?>) headers)
-                .entrySet()
+        if (headers instanceof Map<?, ?> map) {
+            return map.entrySet()
                 .stream()
-                .map(o -> new RecordHeader((String) o.getKey(), ((String) o.getValue()).getBytes(StandardCharsets.UTF_8)))
+                .map(o -> new RecordHeader(
+                    String.valueOf(o.getKey()),
+                    o.getValue() == null ? null : o.getValue().toString().getBytes(StandardCharsets.UTF_8)
+                ))
                 .collect(Collectors.toList());
         }
 
         // a message coming from a Consume task will have headers as a list of Map
-        if (headers instanceof List) {
-            return ((List<Map<String, String>>) headers)
-                .stream()
-                .map(map -> map.entrySet().stream().findAny().get()) // there is only one entry
-                .map(o -> new RecordHeader(o.getKey(), o.getValue().getBytes(StandardCharsets.UTF_8)))
+        if (headers instanceof List<?> list) {
+            return list.stream()
+                .filter(Map.class::isInstance)
+                .map(m -> (Map<?, ?>) m)
+                .flatMap(map -> map.entrySet().stream())
+                .map(o -> new RecordHeader(
+                    String.valueOf(o.getKey()),
+                    o.getValue() == null ? null : o.getValue().toString().getBytes(StandardCharsets.UTF_8)
+                ))
                 .collect(Collectors.toList());
         }
 
